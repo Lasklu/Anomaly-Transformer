@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import numpy as np
 from .attn import AnomalyAttention, AttentionLayer
 from .embed import DataEmbedding, TokenEmbedding
 
@@ -50,7 +50,6 @@ class Encoder(nn.Module):
 
         if self.norm is not None:
             x = self.norm(x)
-
         return x, series_list, prior_list, sigma_list
 
 
@@ -59,7 +58,6 @@ class AnomalyTransformer(nn.Module):
                  dropout=0.0, activation='gelu', output_attention=True):
         super(AnomalyTransformer, self).__init__()
         self.output_attention = output_attention
-
         # Encoding
         self.embedding = DataEmbedding(enc_in, d_model, dropout)
 
@@ -83,10 +81,12 @@ class AnomalyTransformer(nn.Module):
 
     def forward(self, x):
         enc_out = self.embedding(x)
-        enc_out, series, prior, sigmas = self.encoder(enc_out)
+        enc_out, series, prior, sigmas = self.encoder(enc_out) # jeweils array der länge drei, da das für jeden encoder berechnet wird
         enc_out = self.projection(enc_out)
 
         if self.output_attention:
+            #print("Series1", np.shape(series))
+            #print("Prior1", np.shape(prior))
             return enc_out, series, prior, sigmas
         else:
             return enc_out  # [B, L, D]

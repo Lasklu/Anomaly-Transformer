@@ -98,6 +98,8 @@ class AttentionLayer(nn.Module):
             sigma,
             attn_mask
         )
+        #print("Series", series.shape)
+        #print("Prior", prior.shape)
         out = out.view(B, L, -1)
 
         return self.out_projection(out), series, prior, sigma

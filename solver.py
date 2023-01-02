@@ -7,7 +7,7 @@ import time
 from utils.utils import *
 from model.AnomalyTransformer import AnomalyTransformer
 from data_factory.data_loader import get_loader_segment
-
+#import h5py
 
 def my_kl_loss(p, q):
     res = p * (torch.log(p + 0.0001) - torch.log(q + 0.0001))
@@ -84,12 +84,12 @@ class Solver(object):
 
         self.build_model()
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        print(self.device)
         self.criterion = nn.MSELoss()
 
     def build_model(self):
         self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-
         if torch.cuda.is_available():
             self.model.cuda()
 
@@ -220,7 +220,7 @@ class Solver(object):
         for i, (input_data, labels) in enumerate(self.train_loader):
             input = input_data.float().to(self.device)
             output, series, prior, _ = self.model(input)
-            loss = torch.mean(criterion(input, output), dim=-1)
+            loss = torch.mean(criterion(input, output), dim=-1) #hier wird reconstructed und geschaut, wie weit input und output auseinandergehen
             series_loss = 0.0
             prior_loss = 0.0
             for u in range(len(prior)):
@@ -285,22 +285,50 @@ class Solver(object):
         attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
         test_energy = np.array(attens_energy)
         combined_energy = np.concatenate([train_energy, test_energy], axis=0)
-        thresh = np.percentile(combined_energy, 100 - self.anormly_ratio)
+        thresh = np.percentile(combined_energy, 100 - self.anormly_ratio) #finde den threshold für den anomalyscore aus kombinierter train_anomaly score und test_anomalyscore
         print("Threshold :", thresh)
 
         # (3) evaluation on the test set
         test_labels = []
         attens_energy = []
+        series_association = 0
+        prior_association = 0
+        series_array = []
+        prior_array = []
+        series_loss_array = []
+        prior_loss_array = []
         for i, (input_data, labels) in enumerate(self.thre_loader):
+            print("Batch", i)
+            #print(np.where(labels == 1)) #länge 1.batch 256, 2.batch 256, 3.batch 225
             input = input_data.float().to(self.device)
-            output, series, prior, _ = self.model(input)
-
-            loss = torch.mean(criterion(input, output), dim=-1)
+            output, series, prior, _ = self.model(input) #array der länge drei der für jeden encoder die series association enthält
+            print("seresss", np.shape(series[0]))
+            #input shape 3,256,8,100,100
+            #todo 3 handlen -> mean? (im original haben sie addiert)
+            for u in range(len(prior)):
+                if u == 0:
+                    series_association = series[u]
+                    prior_association = prior[u]
+                else:
+                    series_association += series[u]
+                    prior_association += prior[u]
+            #todo batches konkatenieren -> 9,256,8,100,100
+            series_association = series_association.detach().cpu().numpy()
+            prior_association = prior_association.detach().cpu().numpy()
+            series_array.append(series_association)
+            prior_array.append(prior_association)
+            
+            #print("Series", np.shape(series[0])) #->shape 225,100 da für jeden Datenpunkt ein Window von 100 gespannt und series und prior berechnet wird
+            #print("prior", np.shape(prior))
+            #print("prior len", len(prior))
+            #print("Output", np.shape(output))
+            loss = torch.mean(criterion(input, output), dim=-1) #MSE aus input und rekonstruiertem input
 
             series_loss = 0.0
             prior_loss = 0.0
-            for u in range(len(prior)):
-                if u == 0:
+            #Ich muss die batches aneinander appenden, sodass wir am ende pro association ein array der shape(230400, 100) haben
+            for u in range(len(prior)):#für jeden encoder wird der 
+                if u == 0: #für jeden index in dem window wird der gleiche tensor/loss zugeordnet
                     series_loss = my_kl_loss(series[u], (
                             prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
                                                                                                    self.win_size)).detach()) * temperature
@@ -316,26 +344,58 @@ class Solver(object):
                         (prior[u] / torch.unsqueeze(torch.sum(prior[u], dim=-1), dim=-1).repeat(1, 1, 1,
                                                                                                 self.win_size)),
                         series[u].detach()) * temperature
-            metric = torch.softmax((-series_loss - prior_loss), dim=-1)
-
+            #für jeden timestamp haben wir einen seriesassociation wert
+            #für jeden timestamp haben wir einen priorassociation wert
+            print("d",np.shape(prior))
+            metric = torch.softmax((-series_loss - prior_loss), dim=-1)#shape: 256, 100 -> Softmax wird auf 100-Dimension angewendet
+            print("metric",np.shape(metric))
             cri = metric * loss
-            cri = cri.detach().cpu().numpy()
+            print("cri",np.shape(cri))
+            cri = cri.detach().cpu().numpy()#anomaly score
+            a = prior_loss.detach().cpu().numpy()
+            prior_loss_array.append(a)
+            b = series_loss.detach().cpu().numpy()
+            series_loss_array.append(b)
             attens_energy.append(cri)
             test_labels.append(labels)
-
-        attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1)
+            print("Series loss", np.shape(series_loss))
+        series_array = np.mean(np.concatenate(series_array, axis=0), axis=1).reshape(np.shape(series_array)[0]*np.shape(series_array)[1]*self.win_size, self.win_size)
+        prior_array = np.mean(np.concatenate(prior_array, axis=0), axis=1).reshape(np.shape(prior_array)[0]*np.shape(prior_array)[1]*self.win_size, self.win_size)
+        print("1", np.shape(prior_loss_array))
+        prior_loss_array = np.concatenate(prior_loss_array, axis=0)
+        print("2", np.shape(prior_loss_array))
+        prior_loss_array = prior_loss_array.reshape(-1)
+        print("3", np.shape(prior_loss_array))
+        series_loss_array = np.concatenate(series_loss_array, axis=0).reshape(-1)
+        #np.memmap('./series1.npy', series_array)
+        np.save('./series_loss.npy', series_loss_array)
+        np.save('./prior_loss.npy', prior_loss_array)
+        #todo mean über die 8 heads nehmen -> 2304, 100, 100
+        #todo flatten sodass man zu 2300400, 100 kommt
+        print("seriesarray3", np.shape(series_array))
+        #shape: (230400,8,100)
+        
+        
+        #print(series_loss)
+        #print("0", np.shape(attens_energy)) #9,256, 100 -> für jeden batch (9), 256 windows (batchsize), Windowsize(100)
+        #print("1", np.shape(np.concatenate(attens_energy, axis=0))) #2304, 100 -> die batches werden (aneinander) konkateniert
+        #print("2", np.shape(np.concatenate(attens_energy, axis=0).reshape(-1))) #230400 -> jetzt werden die arrays zu einem großen array gemacht
+        attens_energy = np.concatenate(attens_energy, axis=0).reshape(-1) #reshape macht die 256,100 dimension zu einem langen array
+        #Diesr command concatenated als erstes alle zeilen aneinander, zu einem großen array
         test_labels = np.concatenate(test_labels, axis=0).reshape(-1)
+        print(len(attens_energy))
         test_energy = np.array(attens_energy)
         test_labels = np.array(test_labels)
-
         pred = (test_energy > thresh).astype(int)
-
+        np.save('./anomaly_score', test_energy)
+        np.save('./predicted_anomaly', test_energy)
+        np.save('./test_labels.npy', test_labels)
         gt = test_labels.astype(int)
 
         print("pred:   ", pred.shape)
         print("gt:     ", gt.shape)
 
-        # detection adjustment
+        # detection adjustment #hier wird dieses freche adjustment gemacht
         anomaly_state = False
         for i in range(len(gt)):
             if gt[i] == 1 and pred[i] == 1 and not anomaly_state:
