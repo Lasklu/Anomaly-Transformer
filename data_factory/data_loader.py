@@ -67,6 +67,32 @@ class PSMSegLoader(object):
             return np.float32(self.test[
                               index // self.step * self.win_size:index // self.step * self.win_size + self.win_size]), np.float32(
                 self.test_labels[index // self.step * self.win_size:index // self.step * self.win_size + self.win_size])
+class TimeEvalSegLoader(object):
+    def __init__(self, data_path, win_size, step, mode="train"):
+        self.mode = mode
+        self.step = step
+        self.win_size = win_size
+        self.scaler = StandardScaler()
+        data = pd.read_csv(data_path + '/train.csv')
+        data = data.values[:, 1:3]
+
+        data = np.nan_to_num(data)
+
+        self.scaler.fit(data)
+        data = self.scaler.transform(data)
+        test_data = pd.read_csv(data_path + '/test.csv')
+
+        test_data = test_data.values[:, 1:3]
+        test_data = np.nan_to_num(test_data)
+
+        self.test = self.scaler.transform(test_data)
+
+        self.train = data
+        self.val = self.test
+        self.test_labels = pd.read_csv(data_path + '/test.csv').values[:, -1]
+
+        print("test:", self.test.shape)
+        print("train:", self.train.shape)
 class SVDBSegLoader(object):
     def __init__(self, data_path, win_size, step, mode="train"):
         self.mode = mode
@@ -264,6 +290,8 @@ def get_loader_segment(data_path, batch_size, win_size=100, step=100, mode='trai
         dataset = PSMSegLoader(data_path, win_size, 1, mode)
     elif (dataset == 'SVDB'):
         dataset = SVDBSegLoader(data_path, win_size, 1, mode)
+    elif (dataset == 'TimeEval'):
+        dataset = TimeEvalSegLoader(data_path, win_size, 1, mode)
 
     shuffle = False
     if mode == 'train':
