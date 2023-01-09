@@ -3,7 +3,7 @@ import argparse
 
 from torch.backends import cudnn
 from utils.utils import *
-
+import pandas as pd
 from solver import Solver
 
 
@@ -16,14 +16,30 @@ def main(config):
     if (not os.path.exists(config.model_save_path)):
         mkdir(config.model_save_path)
     solver = Solver(vars(config))
-
     if config.mode == 'train':
         solver.train()
     elif config.mode == 'test':
         solver.test()
-
     return solver
 
+class AnomalyTransformer:
+    def __init__(self, train: pd.DataFrame, test: pd.DataFrame, lr: float = 1e-4, num_epochs: int = 10, k: int = 3, win_size: int = 100, input_c: int = 38, output_c: int = 38, batch_size: int = 256, pretrained_model: str = None, model_save_path: str = 'checkpoints', anormly_ratio: float = 4.00) -> None:
+        cudnn.benchmark = True
+        if (not os.path.exists(model_save_path)):
+            mkdir(model_save_path)
+        self.solver = Solver(train, test, lr, num_epochs, k, win_size, input_c, output_c, batch_size, pretrained_model, model_save_path, anormly_ratio)
+    
+    def fit(self):
+        self.solver.train()
+        pass
+    
+    def get_associations(self):
+        s = self.solver.test()
+        print(s)
+        return s
+    
+    def score(self):
+        pass
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

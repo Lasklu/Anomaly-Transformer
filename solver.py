@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import pandas as pd
 import os
 import time
 from utils.utils import *
@@ -62,23 +63,33 @@ class EarlyStopping:
         self.val_loss2_min = val_loss2
 
 
-class Solver(object):
+class Solver():
     DEFAULTS = {}
 
-    def __init__(self, config):
+    def __init__(self, train: pd.DataFrame, test: pd.DataFrame,  lr: float = 1e-4, num_epochs: int = 10, k: int = 3, win_size: int = 100, input_c: int = 38, output_c: int = 38, batch_size: int = 256, pretrained_model: str = None, model_save_path: str = 'checkpoints', anormly_ratio: float = 4.00):
+        self.train = train
+        self.test = test
+        self.lr = lr
+        self.num_epochs = num_epochs
+        self.k = k
+        self.win_size = win_size
+        self.input_c = input_c
+        self.output_c = output_c
+        self.batch_size = batch_size
+        self.pretrained_model = pretrained_model
+        self.model_save_path = model_save_path
+        self.anormly_ratio = anormly_ratio
 
-        self.__dict__.update(Solver.DEFAULTS, **config)
-
-        self.train_loader = get_loader_segment(self.data_path, batch_size=self.batch_size, win_size=self.win_size,
+        self.train_loader = get_loader_segment(train, test, batch_size=self.batch_size, win_size=self.win_size,
                                                mode='train',
                                                dataset=self.dataset)
-        self.vali_loader = get_loader_segment(self.data_path, batch_size=self.batch_size, win_size=self.win_size,
+        self.vali_loader = get_loader_segment(train, test, batch_size=self.batch_size, win_size=self.win_size,
                                               mode='val',
                                               dataset=self.dataset)
-        self.test_loader = get_loader_segment(self.data_path, batch_size=self.batch_size, win_size=self.win_size,
+        self.test_loader = get_loader_segment(train, test, batch_size=self.batch_size, win_size=self.win_size,
                                               mode='test',
                                               dataset=self.dataset)
-        self.thre_loader = get_loader_segment(self.data_path, batch_size=self.batch_size, win_size=self.win_size,
+        self.thre_loader = get_loader_segment(train, test, batch_size=self.batch_size, win_size=self.win_size,
                                               mode='thre',
                                               dataset=self.dataset)
 
@@ -373,6 +384,7 @@ class Solver(object):
         #todo mean über die 8 heads nehmen -> 2304, 100, 100
         #todo flatten sodass man zu 2300400, 100 kommt
         print("seriesarray3", np.shape(series_array))
+        return series_array, prior_array
         #shape: (230400,8,100)
         
         
